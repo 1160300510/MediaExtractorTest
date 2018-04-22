@@ -31,10 +31,13 @@ public class AudioCodec {
     final static int TIMEOUT_USEC = 0;
     private static Handler handler = new Handler(Looper.getMainLooper());
     private static AudioDecodeListener listener;
+    private static int mSampleRate;
+    private static int channel;
 
     /**
      * 从视频文件中分离出音频，并保存在本地
      */
+
 
     @RequiresApi(api = Build.VERSION_CODES.JELLY_BEAN)
     public static void getAudioFromVideo(String videoPath, final String audioSavePath, final AudioDecodeListener listener){
@@ -49,10 +52,17 @@ public class AudioCodec {
                 if (mime.startsWith("audio/")) {
                     audioTrack = i;
                     hasAudio = true;
+                    mSampleRate = trackFormat.getInteger(MediaFormat.KEY_SAMPLE_RATE);
+                    channel = trackFormat.getInteger(MediaFormat.KEY_CHANNEL_COUNT);
+
+                    Log.e("notice","---读取音频数据，采样率-----：：："+mSampleRate);
+                    Log.e("notice","---读取音频数据，声道数-----：：："+channel);
+
                     break;
                 }
             }
             if (hasAudio) {
+
                 extractor.selectTrack(audioTrack);
                 final int finalAudioTrack = audioTrack;
                 new Thread(new Runnable(){
@@ -71,8 +81,11 @@ public class AudioCodec {
                             if (extractor.getSampleFlags() == MediaExtractor.SAMPLE_FLAG_SYNC) {
                                 extractor.advance();
                             }
+
                             while (true) {
                                 int readSampleSize = extractor.readSampleData(byteBuffer, 0);
+                                //Log.e("notice","---读取音频数据，采样率-----：：："+mSampleRate);
+                                //Log.e("notice","---读取音频数据，声道数-----：：："+channel);
                                 Log.e("hero","---读取音频数据，当前读取到的大小-----：：："+readSampleSize);
                                 if (readSampleSize < 0) {
                                     break;
@@ -187,6 +200,8 @@ public class AudioCodec {
                 listener.decodeFail();
             }
         }
+
+
     }
 
 
@@ -199,6 +214,56 @@ public class AudioCodec {
     public interface AudioDecodeListener{
         void decodeOver();
         void decodeFail();
+    }
+    /**
+     * PCM文件转音频
+     * 从pcm文件中读取byte数据
+     * byte数据放进编码器
+     * 把编码后的数据放进文件
+     * */
+    public static void PCM2Audio(String pcmPath,String audioPath,final AudioDecodeListener listener){
+        new Thread(new AudioEncodeRunnable(pcmPath, audioPath, new AudioDecodeListener() {
+            @Override
+            public void decodeOver() {
+                if (listener != null){
+                    handler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            listener.decodeOver();
+                        }
+                    });
+                }
+            }
+
+            @Override
+            public void decodeFail() {
+                if (listener != null){
+                    handler.post(new Runnable() {
+                        @Override
+                        public void run() {
+                            listener.decodeFail();
+                        }
+                    });
+                }
+            }
+        })).start();
+    }
+
+    /**
+     * 写入ADTS头部数据
+     * */
+    public static void addADTStoPacket(byte[] packet, int packetLen) {
+        int profile = 2; // AAC LC
+        int freqIdx = 4; // 44.1KHz
+        int chanCfg = 2; // CPE
+
+        packet[0] = (byte) 0xFF;
+        packet[1] = (byte) 0xF9;
+        packet[2] = (byte) (((profile - 1) << 6) + (freqIdx << 2) + (chanCfg >> 2));
+        packet[3] = (byte) (((chanCfg & 3) << 6) + (packetLen >> 11));
+        packet[4] = (byte) ((packetLen & 0x7FF) >> 3);
+        packet[5] = (byte) (((packetLen & 7) << 5) + 0x1F);
+        packet[6] = (byte) 0xFC;
     }
 
 
